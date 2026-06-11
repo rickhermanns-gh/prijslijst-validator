@@ -15,10 +15,13 @@ WORKDIR /app
 # Install Node for serving
 RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
 
+# Copy package files and install Node deps
+COPY package*.json ./
+RUN npm ci --only=production
+
 # Copy frontend build
 COPY --from=frontend-builder /app/.next ./.next
 COPY --from=frontend-builder /app/public ./public
-COPY --from=frontend-builder /app/package*.json ./
 
 # Install backend dependencies
 COPY requirements.txt .

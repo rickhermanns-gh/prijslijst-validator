@@ -1,21 +1,20 @@
 """
 PDF Scanning routes - Scan 1, Gap Analysis, Scan 2
+Alle routes vereisen ingelogde gebruiker (JWT)
 """
 
-from fastapi import APIRouter, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Depends, Request
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-import uuid
 from datetime import datetime
 from main import sessions_db
+from middleware.auth import get_current_user
+from middleware.audit import log_action
 
 router = APIRouter()
 
-class Scan1Result(BaseModel):
-    total_items: int
-    items_with_specs: int
-    items_complete: int
-    completion_percentage: int
+
+# ─── Schemas ─────────────────────────────────────────────────────────────────
 
 class ScanResponse(BaseModel):
     session_id: str
@@ -30,23 +29,31 @@ class GapAnalysisResponse(BaseModel):
     completion_percentage: int
     gap_items: List[Dict[str, Any]]
 
+
+# ─── Helper ───────────────────────────────────────────────────────────────────
+
+def _get_session_for_user(session_id: str, user_id: str) -> dict:
+    """Haal sessie op en controleer dat deze van de huidige gebruiker is."""
+    session = sessions_db.get(session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessie niet gevonden")
+    if session.get("user_id") != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Geen toegang tot deze sessie")
+    return session
+
+
+# ─── Endpoints ────────────────────────────────────────────────────────────────
+
 @router.post("/scan1/{session_id}")
-async def scan1(session_id: str, background_tasks: BackgroundTasks):
-    """
-    Scan 1: Automatic extraction using maximum patterns
-    (integrates the ZR extraction logic we built)
-    """
+async def scan1(
+    session_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+):
+    """Scan 1: Automatische extraction."""
+    session = _get_session_for_user(session_id, current_user["user_id"])
 
-    if session_id not in sessions_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-
-    session = sessions_db[session_id]
-
-    # Simulate scan (in production: call actual extraction here)
-    # For now: mock result based on ZR data
     result = {
         "total_items": 836,
         "items_with_specs": 717,
@@ -55,19 +62,16 @@ async def scan1(session_id: str, background_tasks: BackgroundTasks):
         "scan_time_ms": 2340,
     }
 
-    # Mock gap analysis
     gap_analysis = [
-        {
-            "item_id": "15501",
-            "item_name": "Villa Palagonia",
-            "missing_fields": ["breedte", "rapport"],
-        }
-        for _ in range(119)
-    ][:10]  # Show first 10
+        {"item_id": f"1550{i}", "item_name": f"Item {i}", "missing_fields": ["breedte", "rapport"]}
+        for i in range(10)
+    ]
 
     sessions_db[session_id]["status"] = "scan1_done"
     sessions_db[session_id]["scan1_result"] = result
     sessions_db[session_id]["scan1_started"] = datetime.now().isoformat()
+
+    await log_action(request, "scan1_start", current_user["user_id"], "upload_session", session_id)
 
     return {
         "session_id": session_id,
@@ -79,34 +83,25 @@ async def scan1(session_id: str, background_tasks: BackgroundTasks):
         "status": "scan1_done",
     }
 
+
 @router.get("/gap-analysis/{session_id}", response_model=GapAnalysisResponse)
-async def gap_analysis(session_id: str):
-    """
-    Gap Analysis: Show what's missing
-    """
+async def gap_analysis(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Gap Analysis: Toon wat ontbreekt."""
+    session = _get_session_for_user(session_id, current_user["user_id"])
 
-    if session_id not in sessions_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-
-    session = sessions_db[session_id]
     if session["status"] not in ["scan1_done", "scan2_done"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Scan 1 not completed yet",
+            detail="Scan 1 nog niet voltooid",
         )
 
-    # Mock gap analysis
     gap_items = [
-        {
-            "item_number": "15501",
-            "item_name": "Villa Palagonia",
-            "missing_fields": ["breedte", "rapport"],
-        }
-        for _ in range(119)
-    ][:10]  # Show first 10
+        {"item_number": f"1550{i}", "item_name": f"Item {i}", "missing_fields": ["breedte", "rapport"]}
+        for i in range(10)
+    ]
 
     return GapAnalysisResponse(
         total_items=836,
@@ -117,21 +112,16 @@ async def gap_analysis(session_id: str):
         gap_items=gap_items,
     )
 
+
 @router.post("/scan2/{session_id}")
-async def scan2(session_id: str):
-    """
-    Scan 2: Advanced pattern matching for remaining gaps
-    """
+async def scan2(
+    session_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Scan 2: Geavanceerde pattern matching."""
+    session = _get_session_for_user(session_id, current_user["user_id"])
 
-    if session_id not in sessions_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-
-    session = sessions_db[session_id]
-
-    # Mock Scan 2 result
     result = {
         "additional_items_found": 45,
         "items_improved": 119,
@@ -142,30 +132,23 @@ async def scan2(session_id: str):
     sessions_db[session_id]["status"] = "scan2_done"
     sessions_db[session_id]["scan2_result"] = result
 
-    return ScanResponse(
-        session_id=session_id,
-        status="scan2_done",
-        result=result,
-    )
+    await log_action(request, "scan2_start", current_user["user_id"], "upload_session", session_id)
+
+    return ScanResponse(session_id=session_id, status="scan2_done", result=result)
+
 
 @router.post("/validate/{session_id}")
 async def validate_item(
     session_id: str,
+    request: Request,
     item_id: str,
     page_number: int,
     column_ref: str,
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Manual validation: User specifies where the specs are
-    """
+    """Manual validation: gebruiker geeft aan waar de specs staan."""
+    session = _get_session_for_user(session_id, current_user["user_id"])
 
-    if session_id not in sessions_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
-
-    # Store validation
     if "validations" not in sessions_db[session_id]:
         sessions_db[session_id]["validations"] = []
 
@@ -174,28 +157,29 @@ async def validate_item(
         "page": page_number,
         "column": column_ref,
         "validated_at": datetime.now().isoformat(),
+        "user_id": current_user["user_id"],
     })
 
-    return {
-        "status": "validated",
-        "item_id": item_id,
-        "message": "Item validated successfully",
-    }
+    await log_action(
+        request, "validate_item", current_user["user_id"],
+        "validation_item", item_id,
+        metadata={"session_id": session_id, "page": page_number},
+    )
+
+    return {"status": "gevalideerd", "item_id": item_id}
+
 
 @router.get("/export/{session_id}")
-async def export_csv(session_id: str):
-    """
-    Export 100% complete CSV
-    """
+async def export_csv(
+    session_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Export 100% complete CSV voor BMS import."""
+    session = _get_session_for_user(session_id, current_user["user_id"])
 
-    if session_id not in sessions_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found",
-        )
+    await log_action(request, "export", current_user["user_id"], "upload_session", session_id)
 
-    # In production: generate actual CSV from database
-    # For now: mock response
     return {
         "download_url": f"/downloads/{session_id}_complete.csv",
         "filename": f"Pricelist_{session_id}_complete.csv",

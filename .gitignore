@@ -40,3 +40,6 @@ npm-debug.log*
 
 # OS
 Thumbs.db
+
+# Uploads — nooit PDF's of user files in git
+backend/uploads/

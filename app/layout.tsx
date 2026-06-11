@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import '../styles/globals.css'
+import GoogleAnalytics from './components/GoogleAnalytics'
 
 export const metadata: Metadata = {
   title: 'Prijslijst Validator',
@@ -16,6 +17,7 @@ export default function RootLayout({
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#0F4C81" />
+        <GoogleAnalytics />
       </head>
       <body className="bg-bg-page text-text-color">
         <div className="min-h-screen flex flex-col">

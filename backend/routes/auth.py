@@ -1,63 +1,127 @@
 """
 Authentication routes
+JWT tokens, bcrypt passwords, rate limiting, httpOnly cookies
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Request, Response
 from pydantic import BaseModel
 import bcrypt
-from datetime import datetime
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from middleware.auth import create_access_token, create_refresh_token
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
-# Mock database
-users_db = {
+# ─────────────────────────────────────────────
+# Mock users — vervang door echte DB queries
+# ─────────────────────────────────────────────
+_hashed = bcrypt.hashpw(b"demo1234!demo", bcrypt.gensalt()).decode()
+USERS_DB = {
     "demo": {
-        "id": "user-123",
+        "id": "user-001",
         "username": "demo",
-        "password_hash": bcrypt.hashpw(b"demo", bcrypt.gensalt()).decode(),
         "email": "demo@example.com",
+        "password_hash": _hashed,
     }
 }
+
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
+
+
+# ─── Schemas ────────────────────────────────
 
 class LoginRequest(BaseModel):
     username: str
     password: str
 
 class LoginResponse(BaseModel):
-    id: str
     username: str
     email: str
-    token: str
+
+
+# ─── Endpoints ──────────────────────────────
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest):
-    """Login endpoint"""
-    user = users_db.get(request.username)
+@limiter.limit("5/15minutes")  # max 5 pogingen per 15 min per IP
+async def login(request: Request, response: Response, body: LoginRequest):
+    """
+    Login: valideert credentials, zet JWT in httpOnly cookie.
+    Rate limited: 5 pogingen per 15 minuten per IP.
+    """
+    user = USERS_DB.get(body.username)
 
-    if not user:
+    # Timing-safe: altijd bcrypt draaien om timing attacks te voorkomen
+    dummy_hash = bcrypt.hashpw(b"dummy", bcrypt.gensalt()).decode()
+    password_hash = user["password_hash"] if user else dummy_hash
+
+    valid = bcrypt.checkpw(body.password.encode(), password_hash.encode())
+
+    if not user or not valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            detail="Ongeldige gebruikersnaam of wachtwoord",
         )
 
-    # Verify password
-    if not bcrypt.checkpw(request.password.encode(), user["password_hash"].encode()):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
+    token_data = {"sub": user["id"], "username": user["username"]}
+    access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
 
-    # Generate token (simplified - use JWT in production)
-    token = f"token_{user['id']}_{datetime.now().timestamp()}"
-
-    return LoginResponse(
-        id=user["id"],
-        username=user["username"],
-        email=user["email"],
-        token=token,
+    # Zet tokens als httpOnly cookies — nooit in response body
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,       # alleen over HTTPS
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=7 * 24 * 60 * 60,  # 7 dagen
+        path="/api/auth/refresh",  # alleen voor refresh endpoint
     )
 
+    return LoginResponse(username=user["username"], email=user["email"])
+
+
+@router.post("/refresh")
+async def refresh_token(request: Request, response: Response):
+    """Vernieuw access token via refresh token cookie."""
+    from jose import JWTError, jwt
+    from middleware.auth import SECRET_KEY, ALGORITHM, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+    from datetime import datetime, timezone
+
+    token = request.cookies.get("refresh_token")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Geen refresh token")
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Ongeldig token type")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Verlopen of ongeldig token")
+
+    access_token = create_access_token({"sub": payload["sub"], "username": payload["username"]})
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    return {"status": "ok"}
+
+
 @router.post("/logout")
-async def logout():
-    """Logout endpoint"""
-    return {"status": "logged out"}
+async def logout(response: Response):
+    """Verwijder auth cookies."""
+    response.delete_cookie("access_token")
+    response.delete_cookie("refresh_token")
+    return {"status": "uitgelogd"}

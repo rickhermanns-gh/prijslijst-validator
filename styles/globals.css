@@ -1,0 +1,214 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ai-werkers Huisstijl CSS Variables */
+:root {
+  --color-primary: #0F4C81;       /* Delfts Blauw */
+  --color-secondary: #7DA8D0;     /* Middenblauw */
+  --color-bg-light: #E8F0FB;      /* Lichtblauw */
+  --color-text: #111111;          /* Inkt Zwart */
+  --color-bg-page: #F5F5F5;       /* Lichtgrijs */
+  --color-border: #D0DFF0;        /* Randblauw */
+
+  /* Functioneel */
+  --color-success-bg: #C6EFCE;
+  --color-success-text: #276221;
+  --color-warning-bg: #FFEB9C;
+  --color-warning-text: #9C5700;
+  --color-error-bg: #FFC7CE;
+  --color-error-text: #9C0006;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Futura', 'Century Gothic', 'Trebuchet MS', sans-serif;
+  background-color: var(--color-bg-page);
+  color: var(--color-text);
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+/* Typography */
+h1 {
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--color-primary);
+  line-height: 1.3;
+  margin-bottom: 1rem;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--color-primary);
+  line-height: 1.4;
+  margin-bottom: 0.75rem;
+}
+
+h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: 0.5rem;
+}
+
+p {
+  margin-bottom: 1rem;
+}
+
+label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--color-text);
+}
+
+/* Buttons */
+.btn {
+  @apply px-6 py-2 rounded-card font-bold text-sm uppercase tracking-wider transition-colors;
+}
+
+.btn-primary {
+  @apply bg-primary text-white hover:bg-opacity-90;
+  background-color: var(--color-primary);
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  @apply border-2 text-primary hover:bg-opacity-5;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-bg-light);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Cards */
+.card {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Inputs */
+input,
+textarea,
+select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background-color: var(--color-bg-page);
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  transition: all 0.2s;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-bg-light);
+}
+
+input::placeholder {
+  color: var(--color-secondary);
+}
+
+/* Forms */
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+/* Alerts */
+.alert {
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.alert-success {
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.alert-warning {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.alert-error {
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+/* Progress */
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: var(--color-primary);
+  transition: width 0.3s ease;
+}
+
+/* Utility */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.mt-1 { margin-top: 0.25rem; }
+.mt-2 { margin-top: 0.5rem; }
+.mt-4 { margin-top: 1rem; }
+.mb-1 { margin-bottom: 0.25rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.mb-4 { margin-bottom: 1rem; }

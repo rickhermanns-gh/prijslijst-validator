@@ -5,6 +5,6 @@
   },
   "deploy": {
     "numReplicas": 1,
-    "startCommand": "npm start & cd /app/backend && python -m uvicorn main:app --host 0.0.0.0 --port 8000"
+    "startCommand": "chmod +x /app/start.sh && /app/start.sh"
   }
 }

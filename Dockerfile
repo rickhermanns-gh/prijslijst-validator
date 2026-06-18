@@ -34,4 +34,4 @@ COPY . .
 EXPOSE 3000 8000
 
 # Run both servers
-CMD ["sh", "-c", "npm start & uvicorn backend.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "npm start & cd /app/backend && uvicorn main:app --host 0.0.0.0 --port 8000"]

@@ -1,3 +1,0 @@
--- Initial migration (same as schema.sql)
--- This is a placeholder for version control
--- Run schema.sql directly for first-time setup

@@ -169,17 +169,38 @@ def _flatten(raw: dict) -> dict:
     composition_parts = ' '.join(raw.get('composition', []))
     is_fr = 'FR' in ' '.join(article_parts) or 'FR' in composition_parts
     has_cs = 'CS' in composition_parts
-    composition = re.sub(r'\bCS\b', '', composition_parts).strip()
+
+    # Cleanup samenstelling: verwijder layout-artefacten die uit de features-kolom lekken
+    COMPOSITION_NOISE = {'Optional', 'optional', 'Weighted', 'weighted', 'Features', 'features'}
+    composition_words = raw.get('composition', [])
+    composition_words = [w for w in composition_words
+                         if w not in COMPOSITION_NOISE
+                         and not re.match(r'^-+$', w)]  # filter "---"
+    composition = re.sub(r'\bCS\b', '', ' '.join(composition_words)).strip()
+    composition = re.sub(r'\s+', ' ', composition).strip()  # normaliseer dubbele spaties
+
+    # Breedte: alleen het eerste numerieke token (voorkomt "300 16" artefacten)
+    width_raw = raw.get('width_cm', [])
+    width_cm = ''
+    for tok in width_raw:
+        clean = tok.replace(',', '.').strip()
+        try:
+            float(clean)
+            width_cm = clean
+            break
+        except ValueError:
+            continue
 
     missing = []
-    if not ' '.join(raw.get('width_cm', [])):
+    if not width_cm:
         missing.append('breedte')
     if not composition:
         missing.append('samenstelling')
     if not ' '.join(raw.get('colors', [])):
         missing.append('kleuren')
-    if not repeat:
-        missing.append('rapport')
+    # rapport is optioneel — effen stoffen hebben geen patroonrapport
+    # if not repeat:
+    #     missing.append('rapport')
 
     return {
         'item_no':        ' '.join(raw.get('item_no', [])),
@@ -187,7 +208,7 @@ def _flatten(raw: dict) -> dict:
         'price_excl':     price_excl,
         'price_rrp':      price_rrp,
         'colors':         ' '.join(raw.get('colors', [])),
-        'width_cm':       ' '.join(raw.get('width_cm', [])),
+        'width_cm':       width_cm,
         'repeat_h_cm':    repeat[0] if repeat else '',
         'repeat_w_cm':    repeat[1] if len(repeat) > 1 else '',
         'martindale':     martindale,

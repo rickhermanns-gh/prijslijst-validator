@@ -5,6 +5,6 @@
   },
   "deploy": {
     "numReplicas": 1,
-    "startCommand": "echo RAILWAY_START; cd /app/backend; python -m uvicorn main:app --host 0.0.0.0 --port 8000 & cd /app; npm start"
+    "startCommand": "echo NODE=$(node --version) && echo NEXT=$(ls /app/.next 2>/dev/null | head -3) && cd /app && npm start"
   }
 }

@@ -495,6 +495,234 @@ def parse_eijffinger_pdf(path: str) -> dict:
     return _build_result(unique)
 
 
+# ─── Eijffinger Voeringstoffen PDF ───────────────────────────────────────────
+
+def parse_eijffinger_voering_pdf(path: str) -> dict:
+    """
+    Parseert Eijffinger voeringstoffen prijslijst (PDF 03).
+    1 pagina, 1 brede kolom.  Art.nrs: 7699-1 t/m 7699-44 (niet aaneengesloten).
+    Kolommen: art.nr | adv.verk.prijs/m | breedte cm | gewicht kg | samenstelling
+              | verduisterend | vlam-vertragend | lichtechtheid | krimp
+    """
+    import pdfplumber
+
+    VOERING_RE = re.compile(r'^\d{4}-\d+$')
+    SKIP_TOP   = 105.0   # kopregel + tabel-header skippen
+    TOLERANCE  = 3.0
+
+    # Kolomgrenzen (x0-bereik)
+    COL_ITEM    = (0,    65)
+    COL_PRICE   = (65,  120)   # € + bedrag
+    COL_WIDTH   = (120, 155)
+    COL_WEIGHT  = (155, 190)
+    COL_COMP    = (190, 365)   # meerdere tokens: "100% PL FR", "75% PL-25% CO"
+    COL_DIMOUT  = (365, 415)   # "Dim Out", "Black Out", "-"
+    COL_FR      = (415, 455)   # "ja" of "-"
+    COL_LICHT   = (455, 500)
+    COL_KRIMP   = (500, 600)
+
+    def _col(x):
+        for name, (lo, hi) in [
+            ('item', COL_ITEM), ('price', COL_PRICE), ('width', COL_WIDTH),
+            ('weight', COL_WEIGHT), ('comp', COL_COMP), ('dimout', COL_DIMOUT),
+            ('fr', COL_FR), ('licht', COL_LICHT), ('krimp', COL_KRIMP),
+        ]:
+            if lo <= x < hi:
+                return name
+        return None
+
+    def _prox_rows(words):
+        filtered = [w for w in words if w['top'] >= SKIP_TOP]
+        filtered.sort(key=lambda w: w['top'])
+        rows: dict[float, list] = {}
+        for w in filtered:
+            y = w['top']
+            if rows:
+                closest = min(rows.keys(), key=lambda ry: abs(ry - y))
+                if abs(closest - y) <= TOLERANCE:
+                    rows[closest].append(w)
+                    continue
+            rows[y] = [w]
+        return rows
+
+    items = []
+    with pdfplumber.open(path) as pdf:
+        page = pdf.pages[0]
+        words = page.extract_words(x_tolerance=1, y_tolerance=1, keep_blank_chars=False)
+
+    rows = _prox_rows(words)
+    for y in sorted(rows.keys()):
+        line = sorted(rows[y], key=lambda w: w['x0'])
+        buckets: dict[str, list] = {
+            'item': [], 'price': [], 'width': [], 'weight': [],
+            'comp': [], 'dimout': [], 'fr': [], 'licht': [], 'krimp': [],
+        }
+        for w in line:
+            c = _col(w['x0'])
+            if c:
+                buckets[c].append(w['text'])
+
+        item_no = ' '.join(buckets['item'])
+        if not VOERING_RE.match(item_no):
+            continue
+
+        # Prijs: "€ 25,95" → 25.95
+        price_tokens = [t for t in buckets['price'] if t != '€']
+        price_str = ' '.join(price_tokens).replace(',', '.').strip()
+        price_f = None
+        m = re.search(r'\d+\.\d{2}', price_str)
+        if m:
+            price_f = float(m.group())
+
+        width_cm = ' '.join(buckets['width']) or ''
+        weight   = ' '.join(buckets['weight']) or ''
+        comp_tokens = buckets['comp']
+        composition = ' '.join(comp_tokens)
+
+        # FR: staat als 'FR' in samenstelling ÓÓÓL als 'ja' in vlam-kol
+        fr_flag_text = ' '.join(buckets['fr']).strip().lower()
+        flame_retardant = ('FR' in comp_tokens) or (fr_flag_text == 'ja')
+
+        # Verduistering: "Dim Out" of "Black Out" of "-"
+        dimout_text = ' '.join(buckets['dimout']).strip()
+        features = ''
+        if dimout_text and dimout_text != '-':
+            features = dimout_text   # "Dim Out" of "Black Out"
+
+        # Lichtechtheid en krimp gaan in features als aanvulling
+        licht = ' '.join(buckets['licht']).strip()
+        krimp = ' '.join(buckets['krimp']).strip()
+        extra_parts = []
+        if licht:
+            extra_parts.append(f'lichtechtheid {licht}')
+        if krimp:
+            extra_parts.append(f'krimp {krimp}')
+        if extra_parts:
+            features = (features + ' | ' if features else '') + ' | '.join(extra_parts)
+
+        missing = [] if price_f else ['prijs']
+
+        items.append({
+            'item_no':         item_no,
+            'article':         'VOERINGSTOFFEN',
+            'collection':      'VOERINGSTOFFEN',
+            'width_cm':        width_cm,
+            'length_m':        '',
+            'repeat_h_cm':     '',
+            'repeat_w_cm':     '',
+            'composition':     composition,
+            'martindale':      None,
+            'flame_retardant': flame_retardant,
+            'coating_cs':      False,
+            'price_excl':      None,
+            'price_rrp':       price_f,
+            'colors':          '',
+            'features':        features,
+            'missing_fields':  missing,
+        })
+
+    return _build_result(items)
+
+
+# ─── Eijffinger Stoffencollecties PDF ────────────────────────────────────────
+
+def parse_eijffinger_stoffen_pdf(path: str) -> dict:
+    """
+    Parseert Eijffinger stoffencollecties prijslijst (PDF 02).
+    1 pagina, 3 kolommen: (collectienaam, optioneel art.nr., adv.verk.prijs incl. BTW).
+    Geen samenstelling of breedte in dit PDF — enkel naam + prijs.
+    """
+    import pdfplumber
+
+    SKIP_TOP  = 80.0    # headers skippen
+    TOLERANCE = 3.0
+    FOOTER_RE = re.compile(r'^(Eijffinger|VOER|Groen|Najaar|2026|Heliumstraat|Zoetermeer|SL)$', re.I)
+
+    # Kolomgrenzen per kolom (naam, art_nr, prijs)
+    COLS = [
+        {'name': (0,   80),  'art': (80,  135), 'euro': (135, 148), 'price': (142, 196)},
+        {'name': (196, 270), 'art': (270, 320), 'euro': (320, 333), 'price': (330, 387)},
+        {'name': (387, 460), 'art': (460, 515), 'euro': (515, 525), 'price': (522, 555)},
+    ]
+
+    def _in(x, rng): return rng[0] <= x < rng[1]
+
+    def _prox_rows(words):
+        filtered = [w for w in words if w['top'] >= SKIP_TOP and not FOOTER_RE.match(w['text'])]
+        filtered.sort(key=lambda w: w['top'])
+        rows: dict[float, list] = {}
+        for w in filtered:
+            y = w['top']
+            if rows:
+                closest = min(rows.keys(), key=lambda ry: abs(ry - y))
+                if abs(closest - y) <= TOLERANCE:
+                    rows[closest].append(w)
+                    continue
+            rows[y] = [w]
+        return rows
+
+    items = []
+    seen: set[str] = set()
+
+    with pdfplumber.open(path) as pdf:
+        page = pdf.pages[0]
+        words = page.extract_words(x_tolerance=1, y_tolerance=1, keep_blank_chars=False)
+
+    rows = _prox_rows(words)
+    for y in sorted(rows.keys()):
+        line = sorted(rows[y], key=lambda w: w['x0'])
+
+        for col in COLS:
+            name_tokens  = [w['text'] for w in line if _in(w['x0'], col['name'])]
+            art_tokens   = [w['text'] for w in line if _in(w['x0'], col['art'])]
+            price_tokens = [w['text'] for w in line
+                            if _in(w['x0'], col['price']) and w['text'] != '€']
+
+            if not name_tokens:
+                continue
+
+            collection = ' '.join(name_tokens)
+            art_nr     = ' '.join(art_tokens) if art_tokens else collection
+
+            # Dedup: zelfde art_nr meerdere keren (bijv. Stockholm 7966 vs 7967-7969)
+            dedup_key = art_nr
+            if dedup_key in seen:
+                continue
+
+            price_str = ' '.join(price_tokens).replace(',', '.').strip()
+            price_f   = None
+            m = re.search(r'\d+\.\d{2}', price_str)
+            if m:
+                price_f = float(m.group())
+
+            if not price_f:
+                continue   # geen prijs → geen bruikbaar item (bijv. losse footertekst)
+
+            seen.add(dedup_key)
+            missing = []  # prijs is gecontroleerd hierboven
+
+            items.append({
+                'item_no':         art_nr,
+                'article':         collection,
+                'collection':      'STOFFENCOLLECTIES',
+                'width_cm':        '',
+                'length_m':        '',
+                'repeat_h_cm':     '',
+                'repeat_w_cm':     '',
+                'composition':     '',
+                'martindale':      None,
+                'flame_retardant': False,
+                'coating_cs':      False,
+                'price_excl':      None,
+                'price_rrp':       price_f,
+                'colors':          '',
+                'features':        'stof',
+                'missing_fields':  missing,
+            })
+
+    return _build_result(items)
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _empty_result() -> dict:

@@ -48,10 +48,20 @@ def _route_xlsx(path: str, supplier: str, filename: str) -> dict:
 
 def _route_pdf(path: str, supplier: str, filename: str) -> dict:
     from utils.pdf_parser import parse_pricelist as parse_pdf_generic
-    from utils.xlsx_parser import parse_eijffinger_pdf
+    from utils.xlsx_parser import (
+        parse_eijffinger_pdf,
+        parse_eijffinger_voering_pdf,
+        parse_eijffinger_stoffen_pdf,
+    )
 
-    # Eijffinger: behang, 6-cijferige itemnummers, twee-kolom layout
     if 'eijffinger' in supplier or 'eijffinger' in filename:
+        # Voeringstoffen: 7699-x itemnummers, breedte + samenstelling
+        if 'voering' in filename:
+            return parse_eijffinger_voering_pdf(path)
+        # Stoffencollecties: 3-koloms, alleen collectienaam + prijs
+        if 'stoff' in filename:
+            return parse_eijffinger_stoffen_pdf(path)
+        # Default: behang (6-cijferige itemnummers, WALLPOWER)
         return parse_eijffinger_pdf(path)
 
     # ZR, Artex, en alle andere textielleveranciers → generieke PDF parser

@@ -48,6 +48,13 @@ COMPOSITION_ABBREVS = {
     'PAN': 'Polyacrylnitrile',
     'CLY': 'Lyocell',
     'CMD': 'Modal',
+    # Coating / technische materialen
+    'PVC': 'PVC',
+    'PU':  'Polyurethane',
+    'HA':  'Hemp',
+    'MTF': 'Metallic Fiber',
+    'WM':  'Wool-Mohair',
+    'ST':  'Steel',
 }
 
 # Regex: optioneel spatie, getal%, AFKORTING (bijv. "100%SE", "60% PES", "55%LI")

@@ -5,6 +5,6 @@
   },
   "deploy": {
     "numReplicas": 1,
-    "startCommand": "echo NODE=$(node --version) && echo NEXT=$(ls /app/.next 2>/dev/null | head -3) && cd /app && npm start"
+    "startCommand": "npm start"
   }
 }

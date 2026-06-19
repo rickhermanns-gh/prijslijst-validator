@@ -63,7 +63,7 @@ async def scan1(
 ):
     """Scan 1: Echte PDF extraction."""
     import time
-    from utils.pdf_parser import parse_zr_pricelist
+    from utils.pdf_parser import parse_pricelist
 
     session = _get_session_for_user(session_id, current_user["user_id"], db)
 
@@ -72,7 +72,7 @@ async def scan1(
 
     t0 = time.time()
     try:
-        parsed = parse_zr_pricelist(session.file_path)
+        parsed = parse_pricelist(session.file_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF parsing mislukt: {str(e)}")
 

@@ -20,8 +20,16 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-ALLOWED_CONTENT_TYPES = {"application/pdf"}
-PDF_MAGIC_BYTES = b"%PDF"
+
+ALLOWED_CONTENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+    "application/vnd.ms-excel",  # .xls
+    "application/octet-stream",  # browser stuurt dit soms voor xlsx
+}
+
+PDF_MAGIC_BYTES  = b"%PDF"
+XLSX_MAGIC_BYTES = b"PK\x03\x04"  # ZIP-based formaat (OOXML)
 
 
 class UploadResponse(BaseModel):
@@ -42,13 +50,6 @@ async def upload_pdf(
 ):
     """Upload PDF en maak sessie aan. Vereist ingelogde gebruiker."""
 
-    # Valideer content-type header
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Alleen PDF bestanden zijn toegestaan",
-        )
-
     content = await file.read()
 
     # Valideer file size
@@ -58,15 +59,19 @@ async def upload_pdf(
             detail="Bestand te groot (max 100MB)",
         )
 
-    # Valideer magic bytes — voorkomt content-type spoofing
-    if not content.startswith(PDF_MAGIC_BYTES):
+    # Detecteer bestandstype op magic bytes (niet content-type header — die is onbetrouwbaar)
+    is_pdf  = content.startswith(PDF_MAGIC_BYTES)
+    is_xlsx = content.startswith(XLSX_MAGIC_BYTES)
+
+    if not is_pdf and not is_xlsx:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ongeldig bestandsformaat",
+            detail="Alleen PDF en XLSX bestanden zijn toegestaan",
         )
 
-    # Sanitize bestandsnaam — geen path traversal
-    safe_filename = Path(file.filename).name if file.filename else "upload.pdf"
+    # Sanitize bestandsnaam
+    original_name = Path(file.filename).name if file.filename else ("upload.pdf" if is_pdf else "upload.xlsx")
+    safe_filename = original_name
     session_id = str(uuid.uuid4())
     file_path = UPLOAD_DIR / f"{session_id}_{safe_filename}"
 

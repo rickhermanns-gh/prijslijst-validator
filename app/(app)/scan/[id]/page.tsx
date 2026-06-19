@@ -117,7 +117,7 @@ export default function ScanPage() {
                   key={idx}
                   className="border border-border-color rounded-lg p-3 text-sm"
                 >
-                  <p className="font-bold text-primary">{gap.item_id}</p>
+                  <p className="font-bold text-primary">{gap.item_no} — {gap.article}</p>
                   <p className="text-secondary">{gap.missing_fields.join(', ')}</p>
                 </div>
               ))}

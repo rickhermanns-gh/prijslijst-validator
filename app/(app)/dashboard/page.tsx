@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-const SUPPLIERS = ['ZR', 'Eijffinger', 'Artex', 'Andere']
+const SUPPLIERS = ['ZR', 'Artex', 'Eijffinger', 'De Munk', 'Andere']
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -16,11 +16,11 @@ export default function DashboardPage() {
     const files = e.target.files
     if (files && files.length > 0) {
       const selectedFile = files[0]
-      if (selectedFile.type === 'application/pdf') {
+      if (selectedFile.type === 'application/pdf' || selectedFile.name.match(/.(xlsx|xls|pdf)$/i)) {
         setFile(selectedFile)
         setError('')
       } else {
-        setError('Alleen PDF-bestanden zijn toegestaan')
+        setError('Alleen PDF en XLSX bestanden zijn toegestaan')
         setFile(null)
       }
     }
@@ -114,7 +114,7 @@ export default function DashboardPage() {
                 <div className="border-2 border-dashed border-border-color rounded-lg p-8 text-center hover:bg-bg-light transition">
                   <input
                     type="file"
-                    accept=".pdf"
+                    accept=".pdf,.xlsx,.xls"
                     onChange={handleFileChange}
                     disabled={loading}
                     className="hidden"

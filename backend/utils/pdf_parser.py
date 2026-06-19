@@ -60,7 +60,8 @@ def _detect_columns(page) -> dict | None:
                 t = w['text'].lower()
                 x = w['x0']
                 if t in ('item', 'art.', 'artikel', 'nr', 'no.'):
-                    cols['item_no'] = x
+                    if 'item_no' not in cols:  # eerste match wint — 'Item' (x=31) mag niet overschreven worden door 'no.' (x=44)
+                        cols['item_no'] = x
                 elif t in ('article', 'artikel', 'naam', 'name', 'omschrijving'):
                     cols['article'] = x
                 elif '€' in w['text'] or t in ('price', 'prijs', 'excl.'):
@@ -226,8 +227,13 @@ def parse_pricelist(pdf_path: str) -> dict:
     seen = set()
     unique_items = []
     for item in items:
-        if item['item_no'] not in seen:
-            seen.add(item['item_no'])
+        item_no = item['item_no']
+        # Filter garbage van contact/adres-pagina's:
+        # Echte item-nummers zijn altijd puur numeriek (geen spaties, letters, of meer dan 6 cijfers)
+        if not re.match(r'^\d{4,6}$', item_no):
+            continue
+        if item_no not in seen:
+            seen.add(item_no)
             unique_items.append(item)
 
     total = len(unique_items)

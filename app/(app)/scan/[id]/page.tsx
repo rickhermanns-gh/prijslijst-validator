@@ -25,10 +25,8 @@ export default function ScanPage() {
   useEffect(() => {
     const runScan = async () => {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-
         // Call Scan 1
-        const res = await fetch(`${backendUrl}/api/scan/scan1/${session_id}`, {
+        const res = await fetch(`/api/scan/scan1/${session_id}`, {
           method: 'POST',
         })
 

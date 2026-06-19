@@ -43,12 +43,11 @@ export default function DashboardPage() {
     setLoading(true)
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
       const formData = new FormData()
       formData.append('file', file)
       formData.append('supplier', supplier)
 
-      const res = await fetch(`${backendUrl}/api/upload`, {
+      const res = await fetch(`/api/upload`, {
         method: 'POST',
         body: formData,
       })

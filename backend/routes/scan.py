@@ -239,10 +239,15 @@ async def export_info(
 ):
     """Metadata voor de export pagina."""
     session = _get_session_for_user(session_id, current_user["user_id"], db)
+    r = session.scan1_result or {}
+    total = r.get("total_items", 0)
+    complete = r.get("complete_items", 0)
+    pct = r.get("completion_percentage", 0)
     return {
-        "filename": f"Pricelist_{session_id}_complete.csv",
-        "completion": "100%",
-        "total_rows": 836,
+        "filename": f"Pricelist_{session.supplier}_{session_id[:8]}_complete.csv",
+        "completion": f"{pct}%",
+        "total_rows": total,
+        "complete_rows": complete,
         "session_id": session_id,
         "supplier": session.supplier,
     }

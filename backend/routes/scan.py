@@ -154,14 +154,40 @@ async def scan2(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Scan 2: Geavanceerde pattern matching."""
+    """Scan 2: Pattern matching enrichment — vult ontbrekende velden aan."""
+    import time
+    from utils.scan2 import enrich_items
+
     session = _get_session_for_user(session_id, current_user["user_id"], db)
 
+    if session.status not in ["scan1_done", "scan2_done"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Scan 1 moet eerst voltooid zijn",
+        )
+
+    scan1 = session.scan1_result or {}
+    items = scan1.get("items", [])
+
+    if not items:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Geen items gevonden in Scan 1 resultaat",
+        )
+
+    t0 = time.time()
+    enriched = enrich_items(items)
+    scan_time_ms = int((time.time() - t0) * 1000)
+
     result = {
-        "additional_items_found": 45,
-        "items_improved": 119,
-        "new_completion_percentage": 85,
-        "scan_time_ms": 3450,
+        "total_items":              enriched["total_items"],
+        "complete_items":           enriched["complete_items"],
+        "incomplete_items":         enriched["incomplete_items"],
+        "new_completion_percentage": enriched["completion_percentage"],
+        "items_improved":           enriched["items_improved"],
+        "fields_filled":            enriched["fields_filled"],
+        "scan_time_ms":             scan_time_ms,
+        "items":                    enriched["items"],
     }
 
     now = datetime.now(timezone.utc)
@@ -171,9 +197,22 @@ async def scan2(
     session.scan2_completed_at = now
     db.commit()
 
-    await log_action(request, "scan2_start", current_user["user_id"], "upload_session", session_id, db=db)
+    await log_action(request, "scan2_complete", current_user["user_id"], "upload_session", session_id, db=db)
 
-    return ScanResponse(session_id=session_id, status="scan2_done", result=result)
+    # Geef samenvatting terug (zonder items array — te groot voor API response)
+    return ScanResponse(
+        session_id=session_id,
+        status="scan2_done",
+        result={
+            "total_items":              enriched["total_items"],
+            "complete_items":           enriched["complete_items"],
+            "incomplete_items":         enriched["incomplete_items"],
+            "new_completion_percentage": enriched["completion_percentage"],
+            "items_improved":           enriched["items_improved"],
+            "fields_filled":            enriched["fields_filled"],
+            "scan_time_ms":             scan_time_ms,
+        },
+    )
 
 
 @router.post("/validate/{session_id}")
@@ -239,10 +278,12 @@ async def export_info(
 ):
     """Metadata voor de export pagina."""
     session = _get_session_for_user(session_id, current_user["user_id"], db)
-    r = session.scan1_result or {}
+    # Gebruik scan2_result als die bestaat, anders scan1_result
+    r = session.scan2_result or session.scan1_result or {}
+    scan_used = "scan2" if session.scan2_result else "scan1"
     total = r.get("total_items", 0)
     complete = r.get("complete_items", 0)
-    pct = r.get("completion_percentage", 0)
+    pct = r.get("new_completion_percentage") or r.get("completion_percentage", 0)
     return {
         "filename": f"Pricelist_{session.supplier}_{session_id[:8]}_complete.csv",
         "completion": f"{pct}%",
@@ -250,6 +291,7 @@ async def export_info(
         "complete_rows": complete,
         "session_id": session_id,
         "supplier": session.supplier,
+        "scan_used": scan_used,
     }
 
 
@@ -283,7 +325,8 @@ async def export_csv(
     writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=";")
     writer.writeheader()
 
-    scan_result = session.scan1_result or {}
+    # Gebruik scan2_result items als die bestaat (rijker data), anders scan1_result
+    scan_result = session.scan2_result or session.scan1_result or {}
     items = scan_result.get("items", [])
 
     for item in items:

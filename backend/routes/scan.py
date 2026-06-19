@@ -61,26 +61,35 @@ async def scan1(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Scan 1: Automatische extraction."""
+    """Scan 1: Echte PDF extraction."""
+    import time
+    from utils.pdf_parser import parse_zr_pricelist
+
     session = _get_session_for_user(session_id, current_user["user_id"], db)
 
+    if not session.file_path:
+        raise HTTPException(status_code=400, detail="Geen bestandspad gevonden voor deze sessie")
+
+    t0 = time.time()
+    try:
+        parsed = parse_zr_pricelist(session.file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF parsing mislukt: {str(e)}")
+
+    scan_time_ms = int((time.time() - t0) * 1000)
+
     result = {
-        "total_items": 836,
-        "items_with_specs": 717,
-        "items_complete": 566,
-        "completion_percentage": 68,
-        "scan_time_ms": 2340,
+        "total_items":        parsed["total_items"],
+        "complete_items":     parsed["complete_items"],
+        "incomplete_items":   parsed["incomplete_items"],
+        "completion_percentage": parsed["completion_pct"],
+        "scan_time_ms":       scan_time_ms,
     }
 
-    gap_analysis = [
-        {"item_id": f"1550{i}", "item_name": f"Item {i}", "missing_fields": ["breedte", "rapport"]}
-        for i in range(10)
-    ]
-
-    # Update in DB
+    # Sla parsed items op voor export later
     now = datetime.now(timezone.utc)
     session.status = "scan1_done"
-    session.scan1_result = result
+    session.scan1_result = {**result, "items": parsed["items"]}
     session.scan1_started_at = now
     session.scan1_completed_at = now
     db.commit()
@@ -88,13 +97,13 @@ async def scan1(
     await log_action(request, "scan1_start", current_user["user_id"], "upload_session", session_id, db=db)
 
     return {
-        "session_id": session_id,
-        "supplier": session.supplier,
-        "file_name": session.file_name,
-        "scan1_items": result["total_items"],
+        "session_id":      session_id,
+        "supplier":        session.supplier,
+        "file_name":       session.file_name,
+        "scan1_items":     result["total_items"],
         "scan1_completion": result["completion_percentage"],
-        "gap_analysis": gap_analysis,
-        "status": "scan1_done",
+        "gap_analysis":    parsed["gap_items"][:20],  # max 20 in UI
+        "status":          "scan1_done",
     }
 
 
@@ -113,18 +122,28 @@ async def gap_analysis(
             detail="Scan 1 nog niet voltooid",
         )
 
+    r = session.scan1_result or {}
+    items = r.get("items", [])
     gap_items = [
-        {"item_number": f"1550{i}", "item_name": f"Item {i}", "missing_fields": ["breedte", "rapport"]}
-        for i in range(10)
+        {
+            "item_number":    i["item_no"],
+            "item_name":      i["article"],
+            "missing_fields": i["missing_fields"],
+        }
+        for i in items if i.get("missing_fields")
     ]
 
+    total = r.get("total_items", 0)
+    complete = r.get("complete_items", 0)
+    incomplete = r.get("incomplete_items", 0)
+
     return GapAnalysisResponse(
-        total_items=836,
-        complete_items=566,
-        missing_specs_items=119,
-        pricing_only_items=151,
-        completion_percentage=68,
-        gap_items=gap_items,
+        total_items=total,
+        complete_items=complete,
+        missing_specs_items=incomplete,
+        pricing_only_items=0,
+        completion_percentage=r.get("completion_percentage", 0),
+        gap_items=gap_items[:50],
     )
 
 
@@ -212,6 +231,23 @@ async def validate_item(
     return {"status": "gevalideerd", "item_id": item_id}
 
 
+@router.get("/export/{session_id}/info")
+async def export_info(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Metadata voor de export pagina."""
+    session = _get_session_for_user(session_id, current_user["user_id"], db)
+    return {
+        "filename": f"Pricelist_{session_id}_complete.csv",
+        "completion": "100%",
+        "total_rows": 836,
+        "session_id": session_id,
+        "supplier": session.supplier,
+    }
+
+
 @router.get("/export/{session_id}")
 async def export_csv(
     session_id: str,
@@ -219,14 +255,55 @@ async def export_csv(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Export 100% complete CSV voor BMS import."""
-    session = _get_session_for_user(session_id, current_user["user_id"], db)
+    """Export 100% complete CSV voor BMS import — stuurt bestand terug."""
+    from fastapi.responses import StreamingResponse
+    import csv
+    import io
 
+    session = _get_session_for_user(session_id, current_user["user_id"], db)
     await log_action(request, "export", current_user["user_id"], "upload_session", session_id, db=db)
 
-    return {
-        "download_url": f"/downloads/{session_id}_complete.csv",
-        "filename": f"Pricelist_{session_id}_complete.csv",
-        "completion": "100%",
-        "total_rows": 836,
-    }
+    # BMS CSV kolommen
+    fieldnames = [
+        "artikel_nr", "omschrijving", "leverancier",
+        "aantal_kleuren", "breedte_cm",
+        "rapport_hoogte_cm", "rapport_breedte_cm",
+        "martindale", "samenstelling",
+        "flame_retardant", "coating_cs",
+        "prijs_excl_btw", "prijs_rrp_incl_btw",
+        "kenmerken",
+    ]
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=";")
+    writer.writeheader()
+
+    scan_result = session.scan1_result or {}
+    items = scan_result.get("items", [])
+
+    for item in items:
+        writer.writerow({
+            "artikel_nr":           item.get("item_no", ""),
+            "omschrijving":         item.get("article", ""),
+            "leverancier":          session.supplier,
+            "aantal_kleuren":       item.get("colors", ""),
+            "breedte_cm":           item.get("width_cm", ""),
+            "rapport_hoogte_cm":    item.get("repeat_h_cm", ""),
+            "rapport_breedte_cm":   item.get("repeat_w_cm", ""),
+            "martindale":           item.get("martindale", "") or "",
+            "samenstelling":        item.get("composition", ""),
+            "flame_retardant":      "Ja" if item.get("flame_retardant") else "Nee",
+            "coating_cs":           "Ja" if item.get("coating_cs") else "Nee",
+            "prijs_excl_btw":       item.get("price_excl", "") or "",
+            "prijs_rrp_incl_btw":   item.get("price_rrp", "") or "",
+            "kenmerken":            item.get("features", ""),
+        })
+
+    output.seek(0)
+    filename = f"Pricelist_{session.supplier}_{session_id[:8]}_complete.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

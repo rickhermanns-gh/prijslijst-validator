@@ -4,7 +4,6 @@
     "builder": "dockerfile"
   },
   "deploy": {
-    "numReplicas": 1,
-    "startCommand": "npm start"
+    "numReplicas": 1
   }
 }

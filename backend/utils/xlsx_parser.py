@@ -298,15 +298,31 @@ def parse_eijffinger_pdf(path: str) -> dict:
         return None
 
     def _parse_rows(words: list, cols: dict, y_max: float = 9999) -> list[dict]:
-        """Groepeer woorden per y-rij en extraheer items."""
-        rows: dict[int, list] = {}
-        for w in words:
-            if w['top'] > y_max:
-                continue
-            if w['text'] in SKIP_WORDS:
-                continue
-            y = round(w['top'] / 4) * 4
-            rows.setdefault(y, []).append(w)
+        """
+        Groepeer woorden per y-rij en extraheer items.
+
+        Gebruikt proximity-grouping (tolerance 3px) in plaats van vaste buckets,
+        omdat pdfplumber consistente y-offsets van ~0.47px toont tussen item_no
+        en prijswoorden op dezelfde visuele rij. Vaste buckets (/6, /8) falen
+        afhankelijk van de absolute y-positie.
+        """
+        TOLERANCE = 3.0  # px — groter dan max offset (~0.47), kleiner dan rij-afstand (~11px)
+
+        # Filter en sorteer op y
+        filtered = [w for w in words if w['top'] <= y_max and w['text'] not in SKIP_WORDS]
+        filtered.sort(key=lambda w: w['top'])
+
+        # Groepeer: elke nieuw woord gaat naar de dichtstbijzijnde bestaande rij
+        # binnen tolerance, anders een nieuwe rij.
+        rows: dict[float, list] = {}
+        for w in filtered:
+            y = w['top']
+            if rows:
+                closest = min(rows.keys(), key=lambda ry: abs(ry - y))
+                if abs(closest - y) <= TOLERANCE:
+                    rows[closest].append(w)
+                    continue
+            rows[y] = [w]
 
         items = []
         for y in sorted(rows.keys()):
@@ -341,13 +357,54 @@ def parse_eijffinger_pdf(path: str) -> dict:
             for w in words:
                 if 30 <= w['top'] <= 75 and w['x0'] > 100:
                     txt = w['text'].strip()
-                    # Collectienaam = niet-numeriek, niet in SKIP_WORDS
-                    if txt and txt not in SKIP_WORDS and not txt.isdigit():
+                    # Collectienaam = niet-numeriek, niet in SKIP_WORDS, minstens 2 tekens
+                    # (len>1 filter voorkomt losse letters zoals 'P' uit gespacieerde koppen)
+                    if txt and len(txt) > 1 and txt not in SKIP_WORDS and not txt.isdigit():
                         current_coll = txt
                         break
 
             # ── Footer-grens: vanaf telefoon/email-regels (~y 770) ──────────
             footer_y = page_height - 80  # laatste 80px overslaan
+
+            # ── WALLPOWER FAVOURITES: 3-koloms mural-overzichtspagina ────────
+            # Detectie: 'WALLPOWER' tekst op y≈61. Items staan in 3 kolommen
+            # (x≈52, x≈206, x≈355) met prijs recht ernaast — géén breedte/lengte.
+            if any(w['text'] == 'WALLPOWER' and 55 <= w['top'] <= 70 for w in words):
+                WP_SPECS = [
+                    ({'item_no': (0,   115), 'price_item': (115, 200)},
+                     lambda w: w['x0'] < 200),
+                    ({'item_no': (200, 265), 'price_item': (265, 350)},
+                     lambda w: 200 <= w['x0'] < 350),
+                    ({'item_no': (350, 420), 'price_item': (420, 545)},
+                     lambda w: w['x0'] >= 350),
+                ]
+                for col_spec, col_filter in WP_SPECS:
+                    col_words = [w for w in words if col_filter(w) and w['top'] > 100]
+                    for raw in _parse_rows(col_words, col_spec, footer_y):
+                        item_no = ' '.join(raw.get('item_no', []))
+                        if not ITEM_RE.match(item_no):
+                            continue
+                        price_f = _to_float(raw.get('price_item', []))
+                        missing = [] if price_f else ['prijs']
+                        all_items.append({
+                            'item_no':         item_no,
+                            'article':         'WALLPOWER',
+                            'collection':      'WALLPOWER',
+                            'width_cm':        '',
+                            'length_m':        '',
+                            'repeat_h_cm':     '',
+                            'repeat_w_cm':     '',
+                            'composition':     '',
+                            'martindale':      None,
+                            'flame_retardant': False,
+                            'coating_cs':      False,
+                            'price_excl':      price_f,
+                            'price_rrp':       None,
+                            'colors':          '',
+                            'features':        'mural',
+                            'missing_fields':  missing,
+                        })
+                continue  # Sla normale parsing over voor WALLPOWER-pagina
 
             # ── Murals-sectie: detecteer "MURALS" koptekst ─────────────────
             mural_y_start = None
